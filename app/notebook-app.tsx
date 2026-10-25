@@ -9,6 +9,7 @@ const today = () => new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).
 const uid = () => crypto.randomUUID();
 type Modal = 'project'|'entry'|'summary'|'idea'|'install'|'backup'|null;
 const categories = ['不限类型','编织','布艺','黏土','纸艺','木作','其他'];
+const customCategoryOption='__custom_category__';
 
 function LocalPhoto({id,alt,large=false}:{id:string;alt:string;large?:boolean}) {
  const [source,setSource]=useState(''),[failed,setFailed]=useState(false);
@@ -30,10 +31,12 @@ export default function NotebookApp() {
  const [selected,setSelected]=useState<string|null>(null),[modal,setModal]=useState<Modal>(null),[lightbox,setLightbox]=useState<string|null>(null);
  const [photos,setPhotos]=useState<string[]>([]),[uploading,setUploading]=useState(false);
  const [editingEntry,setEditingEntry]=useState<string|null>(null);
+ const [categorySelection,setCategorySelection]=useState(categories[0]),[customCategory,setCustomCategory]=useState('');
  const [offlineReady,setOfflineReady]=useState(false),[offlineProblem,setOfflineProblem]=useState(false);
  const [lastBackup,setLastBackup]=useState<string|null>(null),[draftValues,setDraftValues]=useState<Record<string,string>>({}),[draftLoading,setDraftLoading]=useState(false),[draftStatus,setDraftStatus]=useState('');
  const draftScope=useRef(''),draftQueue=useRef(Promise.resolve()),draftForm=useRef<HTMLFormElement>(null),restoreInput=useRef<HTMLInputElement>(null);
  const project=data.projects.find(p=>p.id===selected);
+ const categoryOptions=[...new Set([...categories,...data.projects.map(p=>p.category)])].filter(c=>c!==customCategoryOption);
  async function load() {
   setLoading(true);setError('');
   try {const result=await loadNotebook();setData(result.data);setRevision(result.revision);setLastBackup(await getLastBackup());}
@@ -44,8 +47,9 @@ export default function NotebookApp() {
  useEffect(()=>{if(notice){const timer=setTimeout(()=>setNotice(''),4000);return()=>clearTimeout(timer);}},[notice]);
  async function start(which:Modal,existingEntry?:Entry) {
   if(loading||error||draftLoading)return;setError('');setDraftLoading(true);setPhotos([]);setDraftValues({});setDraftStatus('');
+  setCategorySelection(categories[0]);setCustomCategory('');
   setEditingEntry(existingEntry?.id??null);const key=which+':'+(selected??'new')+':'+(existingEntry?.id??'new');draftScope.current=key;
-  try{const draft=await loadDraft(key);if(draft){setPhotos(draft.photos??[]);setDraftValues(draft.fields??{});setDraftStatus('已接着上次的草稿');}else if(existingEntry){setPhotos(existingEntry.photos);setDraftValues({text:existingEntry.text,date:existingEntry.date});}setModal(which);}
+  try{const draft=await loadDraft(key);if(draft){setPhotos(draft.photos??[]);setDraftValues(draft.fields??{});setCategorySelection(draft.fields.category??categories[0]);setCustomCategory(draft.fields.customCategory??'');setDraftStatus('已接着上次的草稿');}else if(existingEntry){setPhotos(existingEntry.photos);setDraftValues({text:existingEntry.text,date:existingEntry.date});}setModal(which);}
   catch{setError('暂时无法读取草稿，请重新打开后再试。');}finally{setDraftLoading(false);}
  }
  function keepDraft(nextPhotos=photos) {
@@ -63,7 +67,9 @@ export default function NotebookApp() {
  }
  async function saveProject(e:FormEvent<HTMLFormElement>) {
   e.preventDefault();const form=new FormData(e.currentTarget);
-  const next:Project={id:uid(),title:String(form.get('title')).trim(),category:String(form.get('category')),status:'making',created:today(),materials:String(form.get('materials')).trim(),summary:'',entries:[]};
+  const category=categorySelection===customCategoryOption?customCategory.trim():categorySelection;
+  if(!category){setError('给自定义类型起个名字，再开始记录吧。');return;}
+  const next:Project={id:uid(),title:String(form.get('title')).trim(),category,status:'making',created:today(),materials:String(form.get('materials')).trim(),summary:'',entries:[]};
   if(await persist({...data,projects:[next,...data.projects]})){await finishDraft();setModal(null);setSelected(next.id);}
  }
  async function saveEntry(e:FormEvent<HTMLFormElement>) {
@@ -143,7 +149,7 @@ export default function NotebookApp() {
   {notice&&<div className="toast" role="status"><Check size={17}/>{notice}</div>}
   {modal&&<Dialog title={{project:'开始一件新的手作',entry:'记录一个小小的进展',summary:'把收获也收藏起来',idea:'收好一个新灵感',install:'把手作本装进口袋',backup:'给记录留一份备份'}[modal]} onClose={()=>{void closeModal();}} busy={busy||uploading}>
    {error&&<div className="form-error" role="alert">{error}</div>}{['project','entry','summary','idea'].includes(modal)&&<p className="draft-status" role="status">{draftStatus||'填写的内容会自动保留为本机草稿'}</p>}
-   {modal==='project'&&<form ref={draftForm} onInput={()=>keepDraft()} onSubmit={saveProject}><p className="form-intro">给它起个名字，故事就从这里开始。</p><label>作品的名字<input name="title" defaultValue={draftValues.title??''} required autoFocus maxLength={80} placeholder="比如：一只装满春天的小布包"/></label><label>属于哪一类<select name="category" defaultValue={draftValues.category??categories[0]}>{categories.map(c=><option key={c}>{c}</option>)}</select></label><label>材料 / 想法 <span>选填</span><textarea name="materials" defaultValue={draftValues.materials??''} maxLength={2000} rows={4} placeholder="准备用什么？有什么小小的期待？"/></label><button className="primary form-submit" disabled={busy}>{busy?<LoaderCircle className="spin" size={18}/>:<Plus size={18}/>} 开始记录</button></form>}
+   {modal==='project'&&<form ref={draftForm} onInput={()=>keepDraft()} onSubmit={saveProject}><p className="form-intro">给它起个名字，故事就从这里开始。</p><label>作品的名字<input name="title" defaultValue={draftValues.title??''} required autoFocus maxLength={80} placeholder="比如：一只装满春天的小布包"/></label><label>属于哪一类<select name="category" value={categorySelection} onChange={e=>setCategorySelection(e.target.value)}>{categoryOptions.map(c=><option key={c}>{c}</option>)}<option value={customCategoryOption}>＋ 自定义类型</option></select></label>{categorySelection===customCategoryOption&&<label>自定义类型名称<input name="customCategory" value={customCategory} onChange={e=>setCustomCategory(e.target.value)} required maxLength={30} placeholder="比如：皮具、滴胶、首饰…"/></label>}<label>材料 / 想法 <span>选填</span><textarea name="materials" defaultValue={draftValues.materials??''} maxLength={2000} rows={4} placeholder="准备用什么？有什么小小的期待？"/></label><button className="primary form-submit" disabled={busy}>{busy?<LoaderCircle className="spin" size={18}/>:<Plus size={18}/>} 开始记录</button></form>}
    {modal==='entry'&&<form ref={draftForm} onInput={()=>keepDraft()} onSubmit={saveEntry}><label>这一天<input name="date" type="date" required defaultValue={draftValues.date??today()}/></label><label>今天做了什么 <span>文字、照片，选一种也可以</span><textarea name="text" defaultValue={draftValues.text??''} autoFocus maxLength={10000} rows={5} placeholder="做到哪一步了？遇到了什么有意思的事？"/></label><div className="photo-picker"><label className="upload-button"><ImagePlus size={20}/>{uploading?'正在保存照片…':'从相册选照片'}<input type="file" accept="image/*" multiple disabled={uploading||busy} onChange={e=>{void upload(e.target.files);e.target.value='';}}/></label><label className="upload-button"><Camera size={20}/> 直接拍一张<input type="file" accept="image/*" capture="environment" disabled={uploading||busy} onChange={e=>{void upload(e.target.files);e.target.value='';}}/></label></div><p className="photo-help">每条最多 12 张 · 自动缩小照片，节省手机空间</p>{photos.length>0&&<div className="photo-previews">{photos.map(id=><div key={id}><LocalPhoto id={id} alt="待保存的过程照片"/><button type="button" aria-label="移除这张照片" disabled={uploading||busy} onClick={()=>{const next=photos.filter(i=>i!==id);setPhotos(next);keepDraft(next);}}><X size={13}/></button></div>)}</div>}<button className="primary form-submit" disabled={busy||uploading}>{busy||uploading?<LoaderCircle size={18} className="spin"/>:<Check size={18}/>} 保存这段过程</button></form>}
    {modal==='summary'&&project&&<form ref={draftForm} onInput={()=>keepDraft()} onSubmit={saveSummary}><p className="form-intro">成功的小窍门和绕过的小弯路，都值得记住。</p><label>这次的小收获<textarea name="summary" autoFocus maxLength={10000} rows={7} defaultValue={draftValues.summary??project.summary} placeholder="最喜欢哪里？学会了什么？下次想怎么做？"/></label><label className="checkbox"><input type="checkbox" name="completed" defaultChecked={Object.keys(draftValues).length?draftValues.completed==='on':project.status==='done'}/> 这件手作已经完成啦</label><button className="primary form-submit" disabled={busy}><Check size={18}/> 保存心得</button></form>}
    {modal==='idea'&&<form ref={draftForm} onInput={()=>keepDraft()} onSubmit={saveIdea}><p className="form-intro">不用想清楚，先留住它。</p><label>刚刚想到什么<textarea name="text" defaultValue={draftValues.text??''} autoFocus required maxLength={2000} rows={6} placeholder="想试试把旧衣服做成一个小零钱包…"/></label><button className="primary form-submit" disabled={busy}><Plus size={18}/> 放进灵感罐</button></form>}
