@@ -1,0 +1,16 @@
+import { build } from 'esbuild';
+import sharp from 'sharp';
+import { mkdirSync, cpSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+mkdirSync('dist/assets',{recursive:true});
+cpSync('public','dist',{recursive:true});
+const result=await build({entryPoints:['app/main.tsx'],bundle:true,format:'esm',platform:'browser',target:['safari16','chrome100'],jsx:'automatic',minify:true,entryNames:'app-[hash]',assetNames:'asset-[hash]',outdir:'dist/assets',metafile:true,define:{'process.env.NODE_ENV':'"production"'}});
+const outputs=Object.keys(result.metafile.outputs),script=outputs.find(p=>p.endsWith('.js')),style=outputs.find(p=>p.endsWith('.css'));
+if(!script||!style)throw Error('Missing application assets');
+for(const size of [180,192,512])await sharp('public/icon.svg').resize(size,size).png().toFile('dist/icon-'+size+'.png');
+const html=`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>慢慢造物 · 给盘成勤的手作本</title><meta name="description" content="属于你的手机手作记录本，随手拍照、记下过程、收藏心得。无需账号，离线也能记录。"><meta name="theme-color" content="#f8f6f0"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="慢慢造物"><meta name="apple-mobile-web-app-status-bar-style" content="default"><link rel="icon" href="./favicon.svg"><link rel="apple-touch-icon" href="./icon-180.png"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./${style.replace(/^dist\//,'')}"></head><body><div id="app"></div><noscript>请在支持 JavaScript 的手机浏览器中打开手作本。</noscript><script type="module" src="./${script.replace(/^dist\//,'')}"></script></body></html>`;
+writeFileSync('dist/index.html',html);writeFileSync('dist/.nojekyll','');
+const assets=['./','./index.html','./manifest.webmanifest','./favicon.svg','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png',...outputs.map(p=>'./'+p.replace(/^dist\//,''))];
+const hash=createHash('sha256').update(html+outputs.map(p=>readFileSync(p)).join('')).digest('hex').slice(0,12);
+writeFileSync('dist/sw.js',readFileSync('public/sw.js','utf8').replace('__BUILD__',hash).replace('__ASSETS__',JSON.stringify(assets)));
+console.log('Built offline app: '+hash+' ('+assets.length+' cached resources)');
